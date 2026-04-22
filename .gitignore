@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 .cache/
+.data/
 .DS_Store
 *.log
 .env*
