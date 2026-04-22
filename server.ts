@@ -2,7 +2,8 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { buildProfessorProfile, computeMatch } from "./src/lib/mentor-engine";
-import { fetchSourcePreview } from "./src/lib/source-preview";
+import { discoverAcademicProfessors } from "./server/discovery";
+import { fetchSourcePreview } from "./server/services/faculty-page";
 import type { StudentProfile } from "./src/types";
 
 function isStudentProfile(value: unknown): value is StudentProfile {
@@ -24,6 +25,22 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  app.post('/api/discover-researchers', async (req, res) => {
+    const { studentProfile } = req.body ?? {};
+
+    if (!isStudentProfile(studentProfile)) {
+      return res.status(400).json({ error: 'A valid student profile is required before discovering researchers.' });
+    }
+
+    try {
+      const { professors, discoveryMeta } = await discoverAcademicProfessors(studentProfile);
+      res.json({ professors, discoveryMeta });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to build the academic discovery dataset.';
+      res.status(500).json({ error: message });
+    }
+  });
+
   app.post('/api/ingest-profile', async (req, res) => {
     const { url, studentProfile } = req.body ?? {};
 
@@ -37,6 +54,9 @@ async function startServer() {
 
     try {
       const parsedUrl = new URL(url);
+      if (!/^https?:$/.test(parsedUrl.protocol)) {
+        return res.status(400).json({ error: 'Only http and https URLs are supported.' });
+      }
       const preview = await fetchSourcePreview(parsedUrl.toString());
       const professor = buildProfessorProfile(parsedUrl.toString(), preview, studentProfile);
       const match = computeMatch(studentProfile, professor, preview);
