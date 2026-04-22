@@ -3,6 +3,8 @@ import type { SupportedCountryCode } from './lib/countries';
 export type CareerGoal = 'Academic' | 'Industry' | 'Policy' | 'Other';
 export type ProfessorSourceType = 'Google Scholar' | 'ORCID' | 'Faculty Page' | 'Lab Page' | 'Personal Website';
 export type DiscoverySourceStatus = 'success' | 'degraded' | 'skipped';
+export type UserPlan = 'free' | 'pro';
+export type SubscriptionStatus = 'inactive' | 'checkout_pending' | 'active' | 'trialing' | 'past_due' | 'canceled';
 
 export interface StudentProfile {
   id: string;
@@ -74,6 +76,16 @@ export interface MatchResult {
   limitation?: string;
 }
 
+export interface WorkspaceState {
+  studentProfile: StudentProfile | null;
+  professors: Professor[];
+  matches: MatchResult[];
+  discoveryMeta: DiscoveryMeta | null;
+  shortlistIds: string[];
+  comparisonIds: string[];
+  updatedAt: string;
+}
+
 export interface DiscoverySourceMeta {
   source: 'openAlex' | 'orcid' | 'semanticScholar' | 'facultyPages';
   status: DiscoverySourceStatus;
@@ -94,4 +106,21 @@ export interface SuccessStory {
   story: string;
   outcome: string;
   createdAt: string;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  provider: 'password' | 'google' | 'hybrid';
+  plan: UserPlan;
+  subscriptionStatus: SubscriptionStatus;
+  shortlistCount: number;
+  comparisonCount: number;
+}
+
+export interface AuthConfig {
+  googleOAuthEnabled: boolean;
+  stripeBillingEnabled: boolean;
+  proPriceLabel: string;
 }
