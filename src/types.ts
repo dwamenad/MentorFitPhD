@@ -1,5 +1,8 @@
+import type { SupportedCountryCode } from './lib/countries';
+
 export type CareerGoal = 'Academic' | 'Industry' | 'Policy' | 'Other';
 export type ProfessorSourceType = 'Google Scholar' | 'ORCID' | 'Faculty Page' | 'Lab Page' | 'Personal Website';
+export type DiscoverySourceStatus = 'success' | 'degraded' | 'skipped';
 
 export interface StudentProfile {
   id: string;
@@ -7,6 +10,7 @@ export interface StudentProfile {
   field: string;
   researchInterests: string;
   methods: string[];
+  preferredCountries: SupportedCountryCode[];
   careerGoal: CareerGoal;
   preferences: {
     topicOverlap: number;
@@ -24,9 +28,13 @@ export interface Professor {
   fullName: string;
   institution: string;
   department: string;
+  country?: string;
+  countryCode?: string;
+  profileOrigin?: 'discovery' | 'user';
   sourceType?: ProfessorSourceType;
   sourceConfidence?: number;
   sourceSummary?: string;
+  sourceFetched?: boolean;
   highlights?: string[];
   urls: {
     scholar?: string;
@@ -64,6 +72,19 @@ export interface MatchResult {
   explanation: string;
   confidence: number;
   limitation?: string;
+}
+
+export interface DiscoverySourceMeta {
+  source: 'openAlex' | 'orcid' | 'semanticScholar' | 'facultyPages';
+  status: DiscoverySourceStatus;
+  detail: string;
+}
+
+export interface DiscoveryMeta {
+  generatedAt: string;
+  candidateCount: number;
+  resultCount: number;
+  sources: DiscoverySourceMeta[];
 }
 
 export interface SuccessStory {

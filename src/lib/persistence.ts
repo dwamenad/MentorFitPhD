@@ -1,9 +1,10 @@
-import type { MatchResult, Professor, StudentProfile, SuccessStory } from '../types';
+import type { DiscoveryMeta, MatchResult, Professor, StudentProfile, SuccessStory } from '../types';
 
 export const STORAGE_KEYS = {
   studentProfile: 'mentorfit.student-profile',
   professors: 'mentorfit.professors',
   matches: 'mentorfit.matches',
+  discoveryMeta: 'mentorfit.discovery-meta',
   stories: 'mentorfit.success-stories',
 } as const;
 
@@ -44,5 +45,6 @@ export type PersistedCoreState = {
   studentProfile: StudentProfile | null;
   professors: Professor[];
   matches: MatchResult[];
+  discoveryMeta: DiscoveryMeta | null;
   stories: SuccessStory[];
 };
