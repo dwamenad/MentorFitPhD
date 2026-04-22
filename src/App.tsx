@@ -6,8 +6,27 @@ import { Button } from './components/ui/button';
 import { Onboarding } from './components/Onboarding';
 import { Dashboard } from './components/Dashboard';
 import { Landing } from './components/Landing';
-import { MatchResult, Professor, StudentProfile } from './types';
+import { normalizePreferredCountries } from './lib/countries';
+import { DiscoveryMeta, MatchResult, Professor, StudentProfile } from './types';
 import { clearStored, readStored, STORAGE_KEYS, writeStored } from './lib/persistence';
+import { hasDiscoveryPool, mergeDiscoveredProfessors, recomputeMatches, sanitizePersistedProfessors } from './lib/recommendations';
+
+type DiscoverResponse = {
+  professors?: Professor[];
+  discoveryMeta?: DiscoveryMeta;
+  error?: string;
+};
+
+function normalizeStudentProfile(profile: StudentProfile | null) {
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    ...profile,
+    preferredCountries: normalizePreferredCountries((profile as Partial<StudentProfile>).preferredCountries),
+  };
+}
 
 function ErrorBoundary({ children }: { children: ReactNode }) {
   const [errorState, setErrorState] = useState<{ hasError: boolean; error: unknown }>({ hasError: false, error: null });
@@ -47,17 +66,26 @@ function ErrorBoundary({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
-  const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(() =>
-    readStored<StudentProfile | null>(STORAGE_KEYS.studentProfile, null),
-  );
-  const [professors, setProfessors] = useState<Professor[]>(() =>
-    readStored<Professor[]>(STORAGE_KEYS.professors, []),
-  );
-  const [matches, setMatches] = useState<MatchResult[]>(() =>
-    readStored<MatchResult[]>(STORAGE_KEYS.matches, []),
-  );
+  const [{ initialStudentProfile, initialProfessors, initialDiscoveryMeta }] = useState(() => {
+    const storedStudentProfile = normalizeStudentProfile(readStored<StudentProfile | null>(STORAGE_KEYS.studentProfile, null));
+    const storedProfessors = sanitizePersistedProfessors(readStored<Professor[]>(STORAGE_KEYS.professors, []));
+    const storedDiscoveryMeta = readStored<DiscoveryMeta | null>(STORAGE_KEYS.discoveryMeta, null);
+
+    return {
+      initialStudentProfile: storedStudentProfile,
+      initialProfessors: storedProfessors,
+      initialDiscoveryMeta: storedDiscoveryMeta,
+    };
+  });
+
+  const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(initialStudentProfile);
+  const [professors, setProfessors] = useState<Professor[]>(initialProfessors);
+  const [matches, setMatches] = useState<MatchResult[]>(() => recomputeMatches(initialStudentProfile, initialProfessors));
+  const [discoveryMeta, setDiscoveryMeta] = useState<DiscoveryMeta | null>(initialDiscoveryMeta);
+  const [isDiscoveringRecommendations, setIsDiscoveringRecommendations] = useState(false);
+  const [hasBootstrappedDiscovery, setHasBootstrappedDiscovery] = useState(() => hasDiscoveryPool(initialProfessors));
   const [view, setView] = useState<'landing' | 'onboarding' | 'dashboard'>(() =>
-    readStored<StudentProfile | null>(STORAGE_KEYS.studentProfile, null) ? 'dashboard' : 'landing',
+    initialStudentProfile ? 'dashboard' : 'landing',
   );
 
   useEffect(() => {
@@ -73,17 +101,128 @@ export default function App() {
   }, [professors]);
 
   useEffect(() => {
+    if (discoveryMeta) {
+      writeStored(STORAGE_KEYS.discoveryMeta, discoveryMeta);
+    } else {
+      clearStored([STORAGE_KEYS.discoveryMeta]);
+    }
+  }, [discoveryMeta]);
+
+  useEffect(() => {
+    setMatches(recomputeMatches(studentProfile, professors));
+  }, [studentProfile, professors]);
+
+  useEffect(() => {
     writeStored(STORAGE_KEYS.matches, matches);
   }, [matches]);
+
+  const refreshRecommendations = async (
+    profile: StudentProfile,
+    successMessage: string,
+    fallbackErrorMessage: string,
+  ) => {
+    const response = await fetch('/api/discover-researchers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ studentProfile: profile }),
+    });
+
+    const payload = (await response.json()) as DiscoverResponse;
+    if (!response.ok) {
+      throw new Error(payload.error ?? fallbackErrorMessage);
+    }
+
+    const discovered = payload.professors ?? [];
+    if (discovered.length === 0) {
+      throw new Error('No researcher candidates were returned from the academic discovery sources.');
+    }
+
+    setProfessors((current) => mergeDiscoveredProfessors(current, discovered));
+    setDiscoveryMeta(payload.discoveryMeta ?? null);
+    toast.success(successMessage);
+  };
+
+  useEffect(() => {
+    if (!studentProfile || hasDiscoveryPool(professors) || isDiscoveringRecommendations || hasBootstrappedDiscovery) {
+      return;
+    }
+
+    let cancelled = false;
+    setHasBootstrappedDiscovery(true);
+
+    const bootstrapDiscovery = async () => {
+      setIsDiscoveringRecommendations(true);
+
+      try {
+        const response = await fetch('/api/discover-researchers', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ studentProfile }),
+        });
+
+        const payload = (await response.json()) as DiscoverResponse;
+        if (!response.ok) {
+          throw new Error(payload.error ?? 'Failed to build the academic discovery dataset.');
+        }
+
+        const discovered = payload.professors ?? [];
+        if (discovered.length === 0) {
+          throw new Error('No researcher candidates were returned from the academic discovery sources.');
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setProfessors((current) => mergeDiscoveredProfessors(current, discovered));
+        setDiscoveryMeta(payload.discoveryMeta ?? null);
+        toast.success(`Loaded ${discovered.length} researchers from academic sources.`);
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : 'Unable to load the academic discovery dataset.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsDiscoveringRecommendations(false);
+        }
+      }
+    };
+
+    void bootstrapDiscovery();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [studentProfile, professors, isDiscoveringRecommendations, hasBootstrappedDiscovery]);
 
   const handleStart = () => {
     setView(studentProfile ? 'dashboard' : 'onboarding');
   };
 
   const handleOnboardingComplete = (profile: StudentProfile) => {
-    setStudentProfile(profile);
+    const normalizedProfile = normalizeStudentProfile(profile);
+    if (!normalizedProfile) {
+      return;
+    }
+
+    setStudentProfile(normalizedProfile);
     setView('dashboard');
-    toast.success('Profile saved locally.');
+    setIsDiscoveringRecommendations(true);
+    setHasBootstrappedDiscovery(true);
+
+    void (async () => {
+      try {
+        await refreshRecommendations(
+          normalizedProfile,
+          'Profile saved. Loaded researchers from academic sources.',
+          'Failed to build the academic discovery dataset.',
+        );
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Profile saved, but the academic dataset could not be refreshed.');
+      } finally {
+        setIsDiscoveringRecommendations(false);
+      }
+    })();
   };
 
   const updateProfessors = (next: Professor[]) => {
@@ -98,7 +237,10 @@ export default function App() {
     setStudentProfile(null);
     setProfessors([]);
     setMatches([]);
-    clearStored([STORAGE_KEYS.studentProfile, STORAGE_KEYS.professors, STORAGE_KEYS.matches]);
+    setDiscoveryMeta(null);
+    setIsDiscoveringRecommendations(false);
+    setHasBootstrappedDiscovery(false);
+    clearStored([STORAGE_KEYS.studentProfile, STORAGE_KEYS.professors, STORAGE_KEYS.matches, STORAGE_KEYS.discoveryMeta]);
     setView('landing');
     toast.success('Saved session cleared.');
   };
@@ -127,6 +269,26 @@ export default function App() {
                 setProfessors={updateProfessors}
                 matches={matches}
                 setMatches={updateMatches}
+                discoveryMeta={discoveryMeta}
+                isDiscoveringRecommendations={isDiscoveringRecommendations}
+                onRefreshRecommendations={() => {
+                  setIsDiscoveringRecommendations(true);
+                  setHasBootstrappedDiscovery(true);
+
+                  void (async () => {
+                    try {
+                      await refreshRecommendations(
+                        studentProfile,
+                        'Refreshed researchers from academic sources.',
+                        'Failed to refresh the academic discovery dataset.',
+                      );
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : 'Unable to refresh the academic discovery dataset.');
+                    } finally {
+                      setIsDiscoveringRecommendations(false);
+                    }
+                  })();
+                }}
                 onEditProfile={() => setView('onboarding')}
                 onLogout={handleReset}
               />
