@@ -6,6 +6,7 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StudentProfile, CareerGoal } from '@/types';
+import { SUPPORTED_COUNTRIES, getCountryLabel, normalizePreferredCountries, type SupportedCountryCode } from '@/lib/countries';
 import { ChevronRight, ChevronLeft, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ThemeToggle } from './ThemeToggle';
@@ -18,12 +19,16 @@ const METHODS_LIST = [
 
 export function Onboarding({ onComplete, initialData }: { onComplete: (profile: StudentProfile) => void, initialData: StudentProfile | null }) {
   const [step, setStep] = useState(1);
-  const [profile, setProfile] = useState<StudentProfile>(initialData || {
+  const [profile, setProfile] = useState<StudentProfile>(initialData ? {
+    ...initialData,
+    preferredCountries: normalizePreferredCountries(initialData.preferredCountries),
+  } : {
     id: crypto.randomUUID(),
     name: '',
     field: '',
     researchInterests: '',
     methods: [],
+    preferredCountries: [],
     careerGoal: 'Academic',
     preferences: {
       topicOverlap: 30,
@@ -45,6 +50,15 @@ export function Onboarding({ onComplete, initialData }: { onComplete: (profile: 
       methods: p.methods.includes(method) 
         ? p.methods.filter(m => m !== method)
         : [...p.methods, method]
+    }));
+  };
+
+  const toggleCountry = (countryCode: SupportedCountryCode) => {
+    setProfile((current) => ({
+      ...current,
+      preferredCountries: current.preferredCountries.includes(countryCode)
+        ? current.preferredCountries.filter((code) => code !== countryCode)
+        : [...current.preferredCountries, countryCode],
     }));
   };
 
@@ -118,6 +132,29 @@ export function Onboarding({ onComplete, initialData }: { onComplete: (profile: 
                     <SelectItem value="Other">Other</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-3">
+                <label className="text-sm font-semibold">Preferred Countries</label>
+                <p className="text-sm text-muted-foreground">
+                  Optional. Limit discovery to researchers based in these countries.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {SUPPORTED_COUNTRIES.map((country) => (
+                    <Badge
+                      key={country.code}
+                      variant={profile.preferredCountries.includes(country.code) ? "default" : "outline"}
+                      className={`cursor-pointer px-3 py-1.5 rounded-md transition-all ${profile.preferredCountries.includes(country.code) ? 'bg-accent hover:bg-accent/90' : 'hover:border-accent/50'}`}
+                      onClick={() => toggleCountry(country.code)}
+                    >
+                      {country.shortLabel}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {profile.preferredCountries.length > 0
+                    ? `Filtering discovery to ${profile.preferredCountries.map((country) => getCountryLabel(country)).join(', ')}.`
+                    : 'Leave all unselected to search across any available country.'}
+                </p>
               </div>
             </div>
 
